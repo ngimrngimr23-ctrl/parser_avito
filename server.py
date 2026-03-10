@@ -4,6 +4,8 @@ import threading
 import random
 import toml
 import telebot
+import os
+import time
 from flask import Flask
 
 # --- Настройка веб-сервера для Render ---
@@ -14,7 +16,8 @@ def home():
     return "Avito Parser, Telegram Bot & Proxy Manager are running!"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=10000)
+    # Отключаем reloader, чтобы сервер гарантированно не запускал скрипт дважды!
+    app.run(host='0.0.0.0', port=10000, use_reloader=False)
 
 # Глобальная переменная для управления процессом парсера
 parser_process = None
@@ -92,17 +95,20 @@ def run_tg_bot():
     @bot.message_handler(commands=['links'])
     def list_links(message):
         if not check_owner(message): return
-        with open("config.toml", "r", encoding="utf-8") as f:
-            data = toml.load(f)
-        urls = data["avito"].get("urls", [])
-        
-        if not urls:
-            bot.reply_to(message, "Список ссылок пуст.")
-            return
-        msg = "🔗 Текущие ссылки:\n"
-        for i, u in enumerate(urls):
-            msg += f"[{i}] {u}\n"
-        bot.reply_to(message, msg)
+        try:
+            with open("config.toml", "r", encoding="utf-8") as f:
+                data = toml.load(f)
+            urls = data["avito"].get("urls", [])
+            
+            if not urls:
+                bot.reply_to(message, "Список ссылок пуст.")
+                return
+            msg = "🔗 Текущие ссылки:\n"
+            for i, u in enumerate(urls):
+                msg += f"[{i}] {u}\n"
+            bot.reply_to(message, msg)
+        except Exception as e:
+            bot.reply_to(message, f"Ошибка чтения ссылок: {e}")
 
     @bot.message_handler(commands=['add'])
     def add_link(message):
@@ -113,18 +119,21 @@ def run_tg_bot():
             return
         
         new_url = parts[1]
-        with open("config.toml", "r", encoding="utf-8") as f:
-            data = toml.load(f)
+        try:
+            with open("config.toml", "r", encoding="utf-8") as f:
+                data = toml.load(f)
+                
+            if "urls" not in data["avito"]:
+                data["avito"]["urls"] = []
+            data["avito"]["urls"].append(new_url)
             
-        if "urls" not in data["avito"]:
-            data["avito"]["urls"] = []
-        data["avito"]["urls"].append(new_url)
-        
-        with open("config.toml", "w", encoding="utf-8") as f:
-            toml.dump(data, f)
-            
-        bot.reply_to(message, "✅ Ссылка добавлена! Меняю прокси и перезапускаю парсер...")
-        start_parser()
+            with open("config.toml", "w", encoding="utf-8") as f:
+                toml.dump(data, f)
+                
+            bot.reply_to(message, "✅ Ссылка добавлена! Меняю прокси и перезапускаю парсер...")
+            start_parser()
+        except Exception as e:
+            bot.reply_to(message, f"Ошибка при добавлении: {e}")
 
     @bot.message_handler(commands=['del'])
     def del_link(message):
@@ -135,18 +144,21 @@ def run_tg_bot():
             return
         
         idx = int(parts[1])
-        with open("config.toml", "r", encoding="utf-8") as f:
-            data = toml.load(f)
-            
-        urls = data["avito"].get("urls", [])
-        if 0 <= idx < len(urls):
-            removed = urls.pop(idx)
-            with open("config.toml", "w", encoding="utf-8") as f:
-                toml.dump(data, f)
-            bot.reply_to(message, f"🗑 Удалено:\n{removed}\n\nМеняю прокси и перезапускаю...")
-            start_parser()
-        else:
-            bot.reply_to(message, "❌ Нет такого номера. Посмотри номера через /links")
+        try:
+            with open("config.toml", "r", encoding="utf-8") as f:
+                data = toml.load(f)
+                
+            urls = data["avito"].get("urls", [])
+            if 0 <= idx < len(urls):
+                removed = urls.pop(idx)
+                with open("config.toml", "w", encoding="utf-8") as f:
+                    toml.dump(data, f)
+                bot.reply_to(message, f"🗑 Удалено:\n{removed}\n\nМеняю прокси и перезапускаю...")
+                start_parser()
+            else:
+                bot.reply_to(message, "❌ Нет такого номера. Посмотри номера через /links")
+        except Exception as e:
+            bot.reply_to(message, f"Ошибка при удалении: {e}")
 
     @bot.message_handler(commands=['restart'])
     def restart_bot(message):
@@ -154,18 +166,32 @@ def run_tg_bot():
         bot.reply_to(message, "🔄 Принудительная смена прокси и перезапуск...")
         start_parser()
 
+    print("Очищаем зависшие запросы Telegram...")
+    bot.delete_webhook(drop_pending_updates=True)
+    
     print("Telegram-бот управления успешно запущен!")
-    bot.infinity_polling()
+    bot.infinity_polling(skip_pending=True)
 
 # --- Точка входа ---
 if __name__ == '__main__':
-    # 1. Запускаем сервер Flask (в фоне)
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    # 2. Делаем первый старт парсера
-    start_parser()
-    
-    # 3. Запускаем слушателя Telegram (блокирует основной поток)
-    run_tg_bot()
+    # Защита от двойного запуска (важно для Render/Flask)
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        print("Главный процесс стартует...")
+
+        # 1. Запускаем сервер Flask (в фоне)
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
+        
+        # 2. Делаем первый старт парсера
+        start_parser()
+        
+        # 3. Запускаем слушателя Telegram (с защитой от падений)
+        while True:
+            try:
+                run_tg_bot()
+            except Exception as e:
+                print(f"Критическая ошибка бота: {e}. Перезапуск через 5 секунд...")
+                time.sleep(5)
+    else:
+        print("Вторичный процесс проигнорирован.")
