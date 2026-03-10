@@ -1,6 +1,6 @@
 [avito]
 # Уведомления в Telegram
-tg_token = "8731750644:AAGbXeIlNwzWBu2smCwOLHmJVSXGC_uGmdo"
+tg_token = "8652967639:AAFkRs7OHK2uqtVKrb4dV7dG8rmrpdtlYQ4"
 tg_chat_id = ["368097348"]
 
 # Ссылки для парсинга (вставь нужную ссылку с Авито в кавычках)
