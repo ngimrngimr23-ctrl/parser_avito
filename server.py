@@ -39,8 +39,6 @@ def start_parser():
         if proxies:
             chosen_proxy = random.choice(proxies)
             # Защита от ошибки: если нет http://, добавляем его
-            if not chosen_proxy.startswith("http"):
-                chosen_proxy = f"http://{chosen_proxy}"
             
             # Открываем конфиг
             with open("config.toml", "r", encoding="utf-8") as f:
