@@ -1,6 +1,6 @@
 [avito]
-tg_token = ""
-tg_chat_id = []
+tg_token = "8731750644:AAGbXeIlNwzWBu2smCwOLHmJVSXGC_uGmdo"
+tg_chat_id = [368097348]
 vk_token = ""
 vk_user_id = []
 urls = [
