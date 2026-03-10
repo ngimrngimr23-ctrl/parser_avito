@@ -1,0 +1,42 @@
+[avito]
+# Уведомления в Telegram
+tg_token = "8731750644:AAGbXeIlNwzWBu2smCwOLHmJVSXGC_uGmdo"
+tg_chat_id = ["368097348"]
+
+# Ссылки для парсинга (вставь нужную ссылку с Авито в кавычках)
+urls = [
+    "https://www.avito.ru/moskva/..."
+]
+
+# Настройки парсинга и задержек
+count = 1
+max_price = 99999999
+min_price = 0
+pause_general = 300 
+pause_between_links = 10 
+max_count_of_retry = 5
+
+# Фильтры
+keys_word_white_list = []
+keys_word_black_list = []
+seller_black_list = []
+geo = ""
+max_age = 0
+ignore_reserv = true
+ignore_promotion = true
+
+# Технические настройки
+one_time_start = false
+one_file_for_link = false
+parse_views = false
+save_xlsx = false
+use_webdriver = false
+use_bypass_api = false
+use_own_cookies = false
+parse_phone = false
+
+# Прокси (если парсер читает их из proxies.txt, это поле оставляем пустым, 
+# если он требует строку здесь - впишем сюда)
+proxy_string = ""
+proxy_change_url = ""
+cookies_api_key = ""
