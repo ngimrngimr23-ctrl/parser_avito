@@ -27,15 +27,18 @@ def get_proxy_list():
         try:
             with open("csv.csv", "r", encoding="utf-8") as f:
                 for line in f:
-                    # Пропускаем строку с заголовками и пустые строки
                     if "login" in line.lower() or not line.strip(): 
                         continue
-                    parts = line.strip().split(",")
+                    # Поддержка и запятых, и точек с запятой из экселя
+                    delimiter = ";" if ";" in line else ","
+                    parts = line.strip().split(delimiter)
                     if len(parts) >= 4:
-                        login, pwd, ip, port = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
+                        login, pwd = parts[0].strip(), parts[1].strip()
+                        ip, port = parts[2].strip(), parts[3].strip()
                         proxies.append(f"{login}:{pwd}@{ip}:{port}")
         except Exception as e:
             print(f"Ошибка чтения csv.csv: {e}", flush=True)
+            
     elif os.path.exists("proxies.txt"):
         try:
             with open("proxies.txt", "r", encoding="utf-8") as f:
@@ -52,13 +55,13 @@ def start_parser_internal():
     proxies = get_proxy_list()
     
     if not proxies:
-        print("\n❌ КРИТИЧЕСКАЯ ОШИБКА: Прокси не найдены в csv.csv! Парсер остановлен.", flush=True)
+        print("\n❌ КРИТИЧЕСКАЯ ОШИБКА: Прокси не найдены! Убедитесь, что csv.csv загружен на GitHub.", flush=True)
         return False
         
+    print(f"✅ Успешно загружено прокси: {len(proxies)} шт.", flush=True)
     chosen_proxy = random.choice(proxies)
     config_saved = False
     
-    # Пытаемся сохранить конфиг 5 раз (защита от гонки процессов)
     for _ in range(5):
         try:
             with open("config.toml", "r", encoding="utf-8") as f:
@@ -76,11 +79,11 @@ def start_parser_internal():
             time.sleep(1)
             
     if not config_saved:
-        print("\n❌ Файл config.toml заблокирован! Запуск отменен, чтобы не идти без прокси.", flush=True)
+        print("\n❌ Файл config.toml заблокирован! Парсер остановлен.", flush=True)
         return False
 
     hidden = chosen_proxy.split('@')[-1] if '@' in chosen_proxy else 'скрыт'
-    print(f"\n🚀 ПРОКСИ УСПЕШНО ЗАРЯЖЕН: {hidden}", flush=True)
+    print(f"🚀 ПРОКСИ УСПЕШНО ЗАРЯЖЕН: {hidden}", flush=True)
 
     parser_process = subprocess.Popen(
         [sys.executable, "-u", "parser_cls.py"], 
@@ -111,9 +114,10 @@ def monitor_parser():
                 line = parser_process.stdout.readline()
                 if line:
                     print(line, end='', flush=True)
-                    triggers = ["плохие: 1шт", "Request error", "Errno -2", "Name or service not known", "validation error", "HTTP request failed"]
+                    # Добавлена проверка на 429 ошибку
+                    triggers = ["плохие: 1шт", "Request error", "Errno -2", "Name or service not known", "validation error", "HTTP request failed", "429", "Blocked request"]
                     if any(err in line for err in triggers):
-                        print("\n[АВТОПИЛОТ] Ошибка или капча! Срочно меняем прокси...\n", flush=True)
+                        print("\n[АВТОПИЛОТ] Ошибка или бан от Авито! Срочно меняем прокси...\n", flush=True)
                         with parser_lock:
                             parser_process.terminate()
                             parser_process.wait()
@@ -250,4 +254,4 @@ if __name__ == '__main__':
                 print(f"Ошибка бота: {e}. Перезапуск через 5 секунд...", flush=True)
                 time.sleep(5)
     else:
-        print("Вторичный процесс проигнорирован.", flush=True) 
+        print("Вторичный процесс проигнорирован.", flush=True)
