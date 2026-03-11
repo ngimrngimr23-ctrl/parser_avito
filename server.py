@@ -6,8 +6,7 @@ import toml
 import telebot
 import os
 import time
-import urllib.request
-import json
+import csv
 from flask import Flask
 
 # --- Настройка веб-сервера для Render ---
@@ -15,16 +14,42 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Avito Parser, Telegram Bot & Proxy Manager are running!"
+    return "Avito Parser & Telegram Bot are running!"
 
 def run_flask():
-    # Отключаем reloader, чтобы сервер гарантированно не запускал скрипт дважды!
+    # Отключаем reloader, чтобы избежать двойного запуска
     app.run(host='0.0.0.0', port=10000, use_reloader=False)
 
 # Глобальная переменная для управления процессом парсера
 parser_process = None
 
-# --- Умный запуск парсера с ротацией прокси и обходом DNS ---
+# --- Функция чтения прокси прямо из твоего CSV файла ---
+def get_proxy_list():
+    proxies = []
+    # Если ты залил csv.csv, читаем его
+    if os.path.exists("csv.csv"):
+        try:
+            with open("csv.csv", "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader, None)  # Пропускаем первую строку (заголовки)
+                for row in reader:
+                    if len(row) >= 4:
+                        login, pwd, ip, port = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()
+                        # Собираем идеальную ссылку для парсера
+                        proxies.append(f"http://{login}:{pwd}@{ip}:{port}")
+        except Exception as e:
+            print(f"Ошибка чтения csv.csv: {e}")
+    # Резервный вариант, если csv нет, но есть proxies.txt
+    elif os.path.exists("proxies.txt"):
+        try:
+            with open("proxies.txt", "r", encoding="utf-8") as f:
+                proxies = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            print(f"Ошибка чтения proxies.txt: {e}")
+            
+    return proxies
+
+# --- Умный запуск парсера с ротацией ---
 def start_parser():
     global parser_process
     if parser_process:
@@ -33,54 +58,31 @@ def start_parser():
         parser_process.wait()
 
     print("Подготавливаем прокси и конфиг...")
-    try:
-        # Читаем список прокси
-        with open("proxies.txt", "r", encoding="utf-8") as f:
-            proxies = [line.strip() for line in f if line.strip()]
-        
-        if proxies:
-            chosen_proxy = random.choice(proxies)
+    proxies = get_proxy_list()
+    
+    if proxies:
+        chosen_proxy = random.choice(proxies)
+        # Защита: добавляем http:// если его нет
+        if not chosen_proxy.startswith("http"):
+            chosen_proxy = f"http://{chosen_proxy}"
             
-            # МАГИЯ: Обход блокировки DNS на Render
-            if "pool.proxy.market" in chosen_proxy:
-                print("Обнаружен буквенный домен, запрашиваю IP у Google DNS...")
-                try:
-                    url = "https://dns.google/resolve?name=pool.proxy.market&type=A"
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req) as response:
-                        data = json.loads(response.read().decode())
-                        if 'Answer' in data:
-                            # Берем первый найденный IP-адрес
-                            ip = data['Answer'][0]['data']
-                            chosen_proxy = chosen_proxy.replace("pool.proxy.market", ip)
-                            print(f"Домен успешно переведен в IP: {ip}")
-                except Exception as e:
-                    print(f"Не удалось перевести домен (Авито может выдать ошибку): {e}")
-
-            # Обязательно добавляем http:// если его нет, чтобы парсер понял формат
-            if not chosen_proxy.startswith("http"):
-                chosen_proxy = f"http://{chosen_proxy}"
-            
-            # Открываем конфиг
+        try:
             with open("config.toml", "r", encoding="utf-8") as f:
                 data = toml.load(f)
             
-            # Вписываем выбранный прокси в конфиг
             if "avito" not in data:
                 data["avito"] = {}
             data["avito"]["proxy_string"] = chosen_proxy
             
-            # Сохраняем конфиг
             with open("config.toml", "w", encoding="utf-8") as f:
                 toml.dump(data, f)
-            print(f"🚀 Заряжен резидентский прокси: {chosen_proxy.split('@')[-1] if '@' in chosen_proxy else 'скрыт'}")
-        else:
-            print("⚠ Файл proxies.txt пуст! Парсер запустится без прокси.")
-            
-    except FileNotFoundError:
-        print("⚠ Файл proxies.txt не найден! Создайте его и добавьте прокси.")
-    except Exception as e:
-        print(f"⚠ Ошибка при загрузке прокси: {e}")
+                
+            hidden_proxy = chosen_proxy.split('@')[-1] if '@' in chosen_proxy else 'скрыт'
+            print(f"🚀 Заряжен резидентский прокси из CSV: {hidden_proxy}")
+        except Exception as e:
+            print(f"⚠ Ошибка записи в конфиг: {e}")
+    else:
+        print("⚠ Файлы csv.csv или proxies.txt пустые или не найдены! Запуск без прокси.")
 
     print("Запускаем парсер Авито...")
     parser_process = subprocess.Popen([sys.executable, "parser_cls.py"], stdout=sys.stdout, stderr=sys.stderr)
@@ -197,15 +199,15 @@ if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         print("Главный процесс стартует...")
 
-        # 1. Запускаем сервер Flask (в фоне)
+        # 1. Запускаем веб-сервер (чтобы Render не отключал нас)
         flask_thread = threading.Thread(target=run_flask)
         flask_thread.daemon = True
         flask_thread.start()
         
-        # 2. Делаем первый старт парсера
+        # 2. Первый старт парсера
         start_parser()
         
-        # 3. Запускаем слушателя Telegram (с защитой от падений)
+        # 3. Запускаем Телеграм-бота с автоперезапуском при падении
         while True:
             try:
                 run_tg_bot()
@@ -213,4 +215,4 @@ if __name__ == '__main__':
                 print(f"Критическая ошибка бота: {e}. Перезапуск через 5 секунд...")
                 time.sleep(5)
     else:
-        print("Вторичный процесс проигнорирован.")       
+        print("Вторичный процесс проигнорирован.")    
