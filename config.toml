@@ -5,7 +5,7 @@ tg_chat_id = ["368097348"]
 
 # Ссылки для парсинга (вставь нужную ссылку с Авито в кавычках)
 urls = [
-    " https://www.avito.ru/nalchik/avtomobili?localPriority=0&q=%D0%BA%D1%83%D0%BF%D0%B8%D1%82%D1%8C+%D0%BC%D0%B0%D1%88%D0%B8%D0%BD%D1%83&radius=0&s=104&searchRadius=0"
+    "https://www.avito.ru/nalchik/avtomobili?localPriority=0&q=%D0%BA%D1%83%D0%BF%D0%B8%D1%82%D1%8C+%D0%BC%D0%B0%D1%88%D0%B8%D0%BD%D1%83&radius=0&s=104&searchRadius=0"
 ]
 
 # Настройки парсинга и задержек
