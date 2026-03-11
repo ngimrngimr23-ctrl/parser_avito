@@ -6,6 +6,8 @@ import toml
 import telebot
 import os
 import time
+import urllib.request
+import json
 from flask import Flask
 
 # --- Настройка веб-сервера для Render ---
@@ -22,7 +24,7 @@ def run_flask():
 # Глобальная переменная для управления процессом парсера
 parser_process = None
 
-# --- Умный запуск парсера с ротацией прокси ---
+# --- Умный запуск парсера с ротацией прокси и обходом DNS ---
 def start_parser():
     global parser_process
     if parser_process:
@@ -38,7 +40,26 @@ def start_parser():
         
         if proxies:
             chosen_proxy = random.choice(proxies)
-            # Защита от ошибки: если нет http://, добавляем его
+            
+            # МАГИЯ: Обход блокировки DNS на Render
+            if "pool.proxy.market" in chosen_proxy:
+                print("Обнаружен буквенный домен, запрашиваю IP у Google DNS...")
+                try:
+                    url = "https://dns.google/resolve?name=pool.proxy.market&type=A"
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req) as response:
+                        data = json.loads(response.read().decode())
+                        if 'Answer' in data:
+                            # Берем первый найденный IP-адрес
+                            ip = data['Answer'][0]['data']
+                            chosen_proxy = chosen_proxy.replace("pool.proxy.market", ip)
+                            print(f"Домен успешно переведен в IP: {ip}")
+                except Exception as e:
+                    print(f"Не удалось перевести домен (Авито может выдать ошибку): {e}")
+
+            # Обязательно добавляем http:// если его нет, чтобы парсер понял формат
+            if not chosen_proxy.startswith("http"):
+                chosen_proxy = f"http://{chosen_proxy}"
             
             # Открываем конфиг
             with open("config.toml", "r", encoding="utf-8") as f:
@@ -192,4 +213,4 @@ if __name__ == '__main__':
                 print(f"Критическая ошибка бота: {e}. Перезапуск через 5 секунд...")
                 time.sleep(5)
     else:
-        print("Вторичный процесс проигнорирован.")
+        print("Вторичный процесс проигнорирован.")       
