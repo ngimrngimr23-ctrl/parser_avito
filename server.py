@@ -9,44 +9,57 @@ import time
 import csv
 from flask import Flask
 
-# --- Настройка веб-сервера ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Avito Auto-Pilot & Telegram Bot are running!"
+    return "Avito Auto-Pilot is running!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=10000, use_reloader=False)
 
-# --- Глобальные переменные ---
 parser_process = None
 parser_lock = threading.Lock()
 
-# --- Чтение прокси из csv.csv ---
 def get_proxy_list():
     proxies = []
     if os.path.exists("csv.csv"):
         try:
             with open("csv.csv", "r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                next(reader, None)  # Пропускаем заголовки
-                for row in reader:
-                    if len(row) >= 4:
-                        login, pwd = row[0].strip(), row[1].strip()
-                        ip, port = row[2].strip(), row[3].strip()
+                for line in f:
+                    # Пропускаем строку с заголовками и пустые строки
+                    if "login" in line.lower() or not line.strip(): 
+                        continue
+                    parts = line.strip().split(",")
+                    if len(parts) >= 4:
+                        login, pwd, ip, port = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
                         proxies.append(f"{login}:{pwd}@{ip}:{port}")
         except Exception as e:
-            print(f"Ошибка чтения csv.csv: {e}")
+            print(f"Ошибка чтения csv.csv: {e}", flush=True)
+    elif os.path.exists("proxies.txt"):
+        try:
+            with open("proxies.txt", "r", encoding="utf-8") as f:
+                for line in f:
+                    p = line.strip().replace("http://", "").replace("https://", "")
+                    if len(p) > 5:
+                        proxies.append(p)
+        except Exception:
+            pass
     return proxies
 
-# --- Запуск самого парсера ---
 def start_parser_internal():
     global parser_process
     proxies = get_proxy_list()
     
-    if proxies:
-        chosen_proxy = random.choice(proxies)
+    if not proxies:
+        print("\n❌ КРИТИЧЕСКАЯ ОШИБКА: Прокси не найдены в csv.csv! Парсер остановлен.", flush=True)
+        return False
+        
+    chosen_proxy = random.choice(proxies)
+    config_saved = False
+    
+    # Пытаемся сохранить конфиг 5 раз (защита от гонки процессов)
+    for _ in range(5):
         try:
             with open("config.toml", "r", encoding="utf-8") as f:
                 data = toml.load(f)
@@ -57,11 +70,17 @@ def start_parser_internal():
             
             with open("config.toml", "w", encoding="utf-8") as f:
                 toml.dump(data, f)
+            config_saved = True
+            break
+        except Exception:
+            time.sleep(1)
             
-            hidden = chosen_proxy.split('@')[-1] if '@' in chosen_proxy else 'скрыт'
-            print(f"\n🚀 Заряжен прокси: {hidden}")
-        except Exception as e:
-            print(f"Ошибка записи конфига: {e}")
+    if not config_saved:
+        print("\n❌ Файл config.toml заблокирован! Запуск отменен, чтобы не идти без прокси.", flush=True)
+        return False
+
+    hidden = chosen_proxy.split('@')[-1] if '@' in chosen_proxy else 'скрыт'
+    print(f"\n🚀 ПРОКСИ УСПЕШНО ЗАРЯЖЕН: {hidden}", flush=True)
 
     parser_process = subprocess.Popen(
         [sys.executable, "-u", "parser_cls.py"], 
@@ -69,36 +88,41 @@ def start_parser_internal():
         stderr=subprocess.STDOUT, 
         text=True
     )
+    return True
 
-# --- АВТОПИЛОТ (Фоновый мониторинг логов) ---
 def monitor_parser():
     global parser_process
     with parser_lock:
-        start_parser_internal()
+        is_running = start_parser_internal()
     
     while True:
+        if not is_running:
+            time.sleep(10)
+            with parser_lock:
+                is_running = start_parser_internal()
+            continue
+
         if parser_process and parser_process.poll() is not None:
             with parser_lock:
-                start_parser_internal()
+                is_running = start_parser_internal()
         
         try:
             if parser_process and parser_process.stdout:
                 line = parser_process.stdout.readline()
                 if line:
-                    print(line, end='')
-                    # Если парсер поймал банку или ошибку - меняем прокси
-                    if any(err in line for err in ["плохие: 1шт", "Request error", "Errno -2", "Name or service not known"]):
-                        print("\n[АВТОПИЛОТ] Ошибка! Меняем прокси на следующий...\n")
+                    print(line, end='', flush=True)
+                    triggers = ["плохие: 1шт", "Request error", "Errno -2", "Name or service not known", "validation error", "HTTP request failed"]
+                    if any(err in line for err in triggers):
+                        print("\n[АВТОПИЛОТ] Ошибка или капча! Срочно меняем прокси...\n", flush=True)
                         with parser_lock:
                             parser_process.terminate()
                             parser_process.wait()
-                            start_parser_internal()
+                            is_running = start_parser_internal()
                 else:
                     time.sleep(0.1)
         except Exception:
             time.sleep(1)
 
-# --- TELEGRAM БОТ (Пульт управления) ---
 def run_tg_bot():
     try:
         with open("config.toml", "r", encoding="utf-8") as f:
@@ -107,11 +131,11 @@ def run_tg_bot():
             chat_ids = data["avito"].get("tg_chat_id", [])
             owner_id = str(chat_ids[0]) if chat_ids else ""
     except Exception as e:
-        print(f"Ошибка конфига бота: {e}")
+        print(f"Ошибка конфига бота: {e}", flush=True)
         return
 
     if not token or not owner_id:
-        print("Токен не указан! Бот не запущен.")
+        print("Токен не указан! Бот не запущен.", flush=True)
         return
 
     bot = telebot.TeleBot(token)
@@ -207,28 +231,23 @@ def run_tg_bot():
                 parser_process.wait()
             start_parser_internal()
 
-    print("Очищаем зависшие запросы Telegram...")
+    print("Очищаем зависшие запросы Telegram...", flush=True)
     bot.delete_webhook(drop_pending_updates=True)
-    print("Telegram-бот управления успешно запущен!")
+    print("Telegram-бот управления успешно запущен!", flush=True)
     bot.infinity_polling(skip_pending=True)
 
-# --- Точка входа ---
 if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        print("Запуск системы...")
+        print("Запуск системы...", flush=True)
         
-        # 1. Запускаем веб-сервер
         threading.Thread(target=run_flask, daemon=True).start()
-        
-        # 2. Запускаем Автопилот парсера
         threading.Thread(target=monitor_parser, daemon=True).start()
         
-        # 3. Запускаем Бота в главном потоке
         while True:
             try:
                 run_tg_bot()
             except Exception as e:
-                print(f"Ошибка бота: {e}. Перезапуск через 5 секунд...")
+                print(f"Ошибка бота: {e}. Перезапуск через 5 секунд...", flush=True)
                 time.sleep(5)
     else:
-        print("Вторичный процесс проигнорирован.")    
+        print("Вторичный процесс проигнорирован.", flush=True) 
