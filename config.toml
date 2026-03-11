@@ -12,7 +12,7 @@ urls = [
 count = 1
 max_price = 99999999
 min_price = 0
-pause_general = 300 
+pause_general = 1500 
 pause_between_links = 10 
 max_count_of_retry = 5
 
