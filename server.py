@@ -6,7 +6,6 @@ import toml
 import telebot
 import os
 import time
-import csv
 from flask import Flask
 
 app = Flask('')
@@ -23,23 +22,35 @@ parser_lock = threading.Lock()
 
 def get_proxy_list():
     proxies = []
+    
+    # 1. Сначала читаем CSV
     if os.path.exists("csv.csv"):
         try:
             with open("csv.csv", "r", encoding="utf-8") as f:
                 for line in f:
-                    if "login" in line.lower() or not line.strip(): 
+                    clean_line = line.strip()
+                    # Пропускаем пустые строки и заголовки (где есть слово login)
+                    if not clean_line or "login" in clean_line.lower():
                         continue
-                    # Поддержка и запятых, и точек с запятой из экселя
-                    delimiter = ";" if ";" in line else ","
-                    parts = line.strip().split(delimiter)
+                        
+                    # Разделяем строку по запятой (или точке с запятой)
+                    delimiter = ";" if ";" in clean_line else ","
+                    parts = clean_line.split(delimiter)
+                    
                     if len(parts) >= 4:
-                        login, pwd = parts[0].strip(), parts[1].strip()
-                        ip, port = parts[2].strip(), parts[3].strip()
-                        proxies.append(f"{login}:{pwd}@{ip}:{port}")
+                        login = parts[0].strip()
+                        pwd = parts[1].strip()
+                        ip = parts[2].strip()
+                        port = parts[3].strip()
+                        
+                        # Если в колонке порта действительно цифры - берем!
+                        if port.isdigit():
+                            proxies.append(f"{login}:{pwd}@{ip}:{port}")
         except Exception as e:
             print(f"Ошибка чтения csv.csv: {e}", flush=True)
-            
-    elif os.path.exists("proxies.txt"):
+
+    # 2. Если CSV не сработал, пробуем proxies.txt
+    if not proxies and os.path.exists("proxies.txt"):
         try:
             with open("proxies.txt", "r", encoding="utf-8") as f:
                 for line in f:
@@ -48,6 +59,7 @@ def get_proxy_list():
                         proxies.append(p)
         except Exception:
             pass
+            
     return proxies
 
 def start_parser_internal():
@@ -55,7 +67,7 @@ def start_parser_internal():
     proxies = get_proxy_list()
     
     if not proxies:
-        print("\n❌ КРИТИЧЕСКАЯ ОШИБКА: Прокси не найдены! Убедитесь, что csv.csv загружен на GitHub.", flush=True)
+        print("\n❌ КРИТИЧЕСКАЯ ОШИБКА: Прокси не найдены! Убедитесь, что csv.csv загружен.", flush=True)
         return False
         
     print(f"✅ Успешно загружено прокси: {len(proxies)} шт.", flush=True)
@@ -114,7 +126,7 @@ def monitor_parser():
                 line = parser_process.stdout.readline()
                 if line:
                     print(line, end='', flush=True)
-                    # Добавлена проверка на 429 ошибку
+                    # Жесткий список триггеров для моментальной смены прокси
                     triggers = ["плохие: 1шт", "Request error", "Errno -2", "Name or service not known", "validation error", "HTTP request failed", "429", "Blocked request"]
                     if any(err in line for err in triggers):
                         print("\n[АВТОПИЛОТ] Ошибка или бан от Авито! Срочно меняем прокси...\n", flush=True)
@@ -254,4 +266,4 @@ if __name__ == '__main__':
                 print(f"Ошибка бота: {e}. Перезапуск через 5 секунд...", flush=True)
                 time.sleep(5)
     else:
-        print("Вторичный процесс проигнорирован.", flush=True)
+        print("Вторичный процесс проигнорирован.", flush=True)        
